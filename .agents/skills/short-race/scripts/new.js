@@ -1,0 +1,248 @@
+#!/usr/bin/env node
+// node new.js "<model A>" "<model B>" [--effort e] [--prompt "…"] [--subject "…"] [--noun n] [--emoji e] [--slug s] [--force]
+// Writes a ready-to-record vertical lesson for short's make.js:
+// lesson.json (narration, headline, post), compare.json (models and prompt),
+// beats.js (this skill's shared beats) and take.sh.
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { resolve } = require("./models");
+const { GIRAFFE: DEFAULT_PROMPT } = require("./prompt");
+
+const SKILL = path.resolve(__dirname, "..");
+const MAKER = path.resolve(SKILL, "..", "short");
+const ROOT = process.env.LPM_TIKTOK_DIR || path.join(process.env.LPM_LESSONS_DIR || path.join(os.homedir(), "Movies/lpm-lessons"), "tiktok");
+// A narrow, tall window, so each row takes about half the frame. The wide shot
+// scales it to 982x1723 px and sits 6 px below centre, so at the payoff,
+// trimmed to the colour bars (trim.js), the top bar sits at y 270, below the
+// phone's status bar and TikTok's tabs (y 0–253). The opening's headline goes
+// under that bar and the slammed names under the headline, all over the top
+// page. Each row's page is then about 570x420 pt, a little wider than the
+// 900x700 stage's shape, and TikTok's caption covers the bottom row's lower
+// part, so the giraffe sits high on the stage. A 16" MacBook Pro screen with
+// the Dock showing holds a window up to 1009 pt tall.
+const TALL = { window: { w: 570, h: 1000 }, windowShiftY: 6, stickerTop: 345, slamTop: 575 };
+const CLI_NAME = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", muse: "Muse Code" };
+// Cursor and Muse Code take the prompt as their launch argument, read from a
+// file: lpm folds a prompt into the launch line only for Claude Code and Codex.
+const ARG_PROMPT = new Set(["cursor", "muse"]);
+// "#muse" is the band's; viewers find Meta's models as Meta AI.
+const BRAND_TAG = { muse: "metaai" };
+
+const args = process.argv.slice(2);
+const VALUE_FLAGS = ["--effort", "--prompt", "--subject", "--noun", "--emoji", "--slug"];
+const opt = (name) => {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
+};
+const specs = args.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.includes(args[i - 1]));
+if (specs.length !== 2) {
+  console.error('usage: node new.js "opus 5.5 max" "gpt 6 astra ultra" [--effort e] [--prompt "…"] [--subject "…"] [--noun n] [--emoji e] [--slug s] [--force]');
+  process.exit(1);
+}
+
+let a, b;
+try {
+  // --effort is the race's own, for a side that names none; a side that can't
+  // run at it stops here rather than run at another level.
+  [a, b] = specs.map((spec) => resolve(spec, opt("--effort")));
+} catch (e) {
+  console.error(e.message);
+  process.exit(1);
+}
+if (a.dir === b.dir) {
+  console.error(`both sides are ${a.label}: pick two different models or efforts`);
+  process.exit(1);
+}
+// Model B runs in the copy that Run in duplicates makes. On the same CLI the
+// dialog's per-run picker pins it, and that picker offers each Claude family
+// only by its bare name (its newest model). On the other CLI the copy's own run
+// override starts the project's second button, which launches model B pinned.
+const crossCli = a.cli !== b.cli;
+// Run #1 takes the prompt through its composer, which types into Claude Code
+// and Codex; Cursor and Muse Code get it as a launch argument, so they run in
+// the copy.
+if (ARG_PROMPT.has(a.cli)) {
+  console.error(
+    ARG_PROMPT.has(b.cli)
+      ? `${a.name} and ${b.name} both take their prompt at launch, and run #1 needs a Claude or GPT model: race one of them against one`
+      : `put ${a.name} on the right: a ${CLI_NAME[a.cli]} model runs in the copy`,
+  );
+  process.exit(1);
+}
+// Ultracode is switched on in run #1's own session (/effort ultracode on); the
+// copy starts a fresh one.
+if (b.ultracode) {
+  console.error(`put ${b.label} on the left: ultracode is switched on in run #1's session, and the copy starts a fresh one`);
+  process.exit(1);
+}
+if (!crossCli && !b.pickerModel) {
+  console.error(`the copy's model picker can't pick ${b.name} (it offers each family's newest); swap the sides or pick the newest`);
+  process.exit(1);
+}
+
+// Model A is picked on camera in run #1's composer when its Model menu offers
+// it: Claude only (the Codex picker isn't scripted), and a family's newest
+// only, as for model B. Otherwise the header button launches it pinned.
+const pickA = a.cli === "claude" && Boolean(a.pickerModel);
+const PIN = / --(model|effort) \S+/g;
+if (pickA) a.cmd = a.cmd.replace(PIN, "");
+
+const prompt = opt("--prompt") || DEFAULT_PROMPT;
+const giraffe = prompt === DEFAULT_PROMPT;
+const subject = giraffe ? "a giraffe flying a plane" : opt("--subject")?.trim().replace(/[.!]+$/, "");
+// The video says what both models were asked to build, so a custom prompt
+// needs its short name.
+if (!subject) {
+  console.error('a custom --prompt needs --subject "<what it builds>", such as "a lava lamp": the video says it aloud');
+  process.exit(1);
+}
+// lpm types the copy's launch line, prompt included, into a shell that is still
+// starting, and macOS cuts a terminal line off at 1024 bytes: the agent never
+// starts and the race waits out its limit. Cursor and Muse Code read their
+// prompt from a file.
+// The line is measured as lpm writes it, so the margin covers only the newline
+// and a stray byte or two.
+const LINE_MAX = 1010;
+if (!ARG_PROMPT.has(b.cli)) {
+  // On the same CLI the copy runs run #1's button with model B pinned on it
+  // the way the dialog's picker pins it: by family name ("--model opus").
+  const pinB = [`--model ${b.pickerModel?.toLowerCase()}`, b.effort && `--effort ${b.effort}`].filter(Boolean).join(" ");
+  const copyCmd = crossCli ? b.cmd : `${a.cmd.replace(PIN, "")} ${pinB}`;
+  const line = `${copyCmd} --session-id ${"0".repeat(36)} '${prompt.replace(/'/g, "'\\''")}'`;
+  const bytes = Buffer.byteLength(line);
+  if (bytes > LINE_MAX) {
+    console.error(`the copy's launch line would be ${bytes} bytes, over the ${LINE_MAX} a starting shell takes: shorten the prompt by ${bytes - LINE_MAX}`);
+    process.exit(1);
+  }
+}
+// A prompt with a name of its own ("pelican") gets the giraffe's copy: "the
+// pelican test" in the title, "Which pelican wins?" at the end.
+const noun = giraffe ? "giraffe" : opt("--noun")?.trim().replace(/[.!]+$/, "") || null;
+const slugify = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const topic = noun ? slugify(noun) : slugify(subject).split("-").slice(0, 3).join("-");
+const slug = opt("--slug") || slugify([`${a.dir}-vs-${b.dir}`, topic].filter(Boolean).join("-"));
+const dir = path.join(ROOT, slug);
+if (fs.existsSync(dir) && !args.includes("--force")) {
+  console.error(`${dir} already exists (--force to overwrite its generated files)`);
+  process.exit(1);
+}
+
+const sameModel = a.name === b.name;
+const effortWord = (m) => m.spokenEffort || "default";
+const upper = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const emoji = giraffe ? " 🦒" : opt("--emoji") ? ` ${opt("--emoji").trim()}` : "";
+// A hook over 2.5 s loses the scroll: name the brands viewers search for when
+// they differ ("Claude or ChatGPT?", "Claude or Grok?"), families when those
+// differ ("Opus or Fable?"), full names only when they don't.
+const family = (m) => m.name.split(" ")[0];
+const branded = a.brand !== b.brand;
+const hookNames = branded ? [a.brand, b.brand] : family(a) !== family(b) ? [family(a), family(b)] : [a.name, b.name];
+
+// Most of the video is the two finished pages, and nothing is written over
+// them, so they can be compared: only the line over the terminals is
+// captioned, the headline shows only with the slammed names over the dimmed
+// opening, and lpm.cx sits in the top colour bar rather than on a page.
+const narration = [
+  {
+    id: "hook",
+    text: sameModel ? `${upper(effortWord(a))} or *${effortWord(b)}* effort?` : `${hookNames[0]} or *${hookNames[1]}*?`,
+    headline: branded ? `${a.brand} vs ${b.brand}: ${a.name} vs ${b.name}${emoji}` : `${a.headline} vs ${b.headline}${emoji}`,
+    caption: false,
+  },
+  // The first two lines play over the finished pages (lesson.open): viewers
+  // left at 0:02 when a one-line opening cut to the setup. The setup happens
+  // under them, unseen, so the video goes straight to both models at work.
+  // The second names the prompt, so viewers know what the pages were asked to
+  // be without reading it in the terminals.
+  { id: "tease", text: `Same prompt: ${giraffe ? "a *giraffe* flying a *plane*" : subject.replace(/(\S+)$/, "*$1*")}.`, caption: false },
+  // The only shot of lpm's terminals, cut as soon as it's spoken.
+  {
+    id: "run",
+    text: sameModel
+      ? `*${upper(effortWord(a))}* and *${effortWord(b)}* effort build it in lpm's *terminal*.`
+      : `*${a.name}* and *${b.name}* build it in lpm's *terminal*.`,
+  },
+  { id: "reveal", text: "Here's what they *built*.", caption: false },
+  // Viewers name the next pair in the comments.
+  { id: "wrap", text: `Which ${noun || "one"} *wins*? Comment two models to race *next*.`, caption: false },
+];
+
+const clis = new Set([a.cli, b.cli]);
+const hashtags = [
+  ...new Set([a, b].map((m) => BRAND_TAG[m.cli] || m.brand.toLowerCase())),
+  clis.has("claude") ? "claudecode" : clis.has("codex") ? "codex" : "cursor",
+  "vibecoding",
+  !branded && "aicoding",
+  "lpm",
+].filter(Boolean);
+const what = giraffe ? "a giraffe flying a one-seat plane, built as an animated web page" : `${subject}, built as a web page`;
+const lesson = {
+  title: `${a.headline} vs ${b.headline}${noun ? `: the ${noun} test` : ", same prompt"}`,
+  ...TALL,
+  open: 2,
+  slam: sameModel ? { a: a.label, b: b.label } : { a: a.name, b: b.name },
+  cta: false,
+  narration,
+  post: {
+    caption: `${branded ? `${a.brand} vs ${b.brand} for coding: ` : `${a.brand} `}${a.headline} vs ${b.headline} on the same prompt: ${what}, side by side in lpm's terminal. Which ${noun || "one"} wins? Comment the two models you want me to race next.`,
+    hashtags: hashtags.slice(0, 5),
+  },
+};
+const compare = {
+  a,
+  b,
+  prompt,
+  project: "arena",
+  pickA,
+  payoff: "bars",
+  mark: "lpm.cx",
+  cues: {
+    a: sameModel ? effortWord(a) : a.name,
+    b: sameModel ? effortWord(b) : b.name,
+    lpm: "terminal",
+    reveal: "built",
+  },
+};
+
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, "lesson.json"), JSON.stringify(lesson, null, 2) + "\n");
+fs.writeFileSync(path.join(dir, "compare.json"), JSON.stringify(compare, null, 2) + "\n");
+fs.writeFileSync(
+  path.join(dir, "beats.js"),
+  `// Generated by short-race: change compare.json or lesson.json, not this file.\n` +
+    `module.exports = require(${JSON.stringify(path.join(SKILL, "scripts", "beats.js"))})({\n` +
+    `  config: require("./compare.json"),\n  dir: __dirname,\n});\n`,
+);
+// A take changes the user's default model for new sessions: picking model A in
+// the composer runs Claude Code's /model and /effort, Cursor CLI saves the
+// model it was launched with, and Muse Code seeds its catalog's default model.
+// take.sh puts each default back afterwards.
+const saved = [pickA && "claude", clis.has("cursor") && "cursor", clis.has("muse") && "muse"].filter(Boolean);
+const RUN_TAKE = path.join(MAKER, "scripts", "take.sh");
+const backup = (c) => `"$DIR/_${c}-settings.backup.json" ${c}`;
+fs.writeFileSync(
+  path.join(dir, "take.sh"),
+  saved.length
+    ? `#!/bin/sh
+# The take changes the default model of ${saved.map((c) => CLI_NAME[c]).join(" and ")}, and puts it back afterwards.
+set -u
+DIR="$(cd "$(dirname "$0")" && pwd)"
+DEFAULTS="${path.join(SKILL, "scripts", "cli-default.js")}"
+
+${saved.map((c) => `node "$DEFAULTS" save ${backup(c)} || exit 1\n`).join("")}trap '${saved.map((c) => `node "$DEFAULTS" restore ${backup(c)}`).join("; ")}' EXIT
+trap 'exit 130' INT TERM
+"${RUN_TAKE}" "$DIR" "$@"
+`
+    : `#!/bin/sh
+exec "${RUN_TAKE}" "$(dirname "$0")" "$@"
+`,
+  { mode: 0o755 },
+);
+
+console.log(`${slug}
+  left:   ${a.label}  →  ${a.cmd}${pickA ? `, then ${[a.pickerModel, a.pickerEffort].filter(Boolean).join(" · ")} in its composer` : ""}${a.ultracode ? ", then /effort ultracode on in its terminal" : ""}
+  right:  ${b.label}  →  ${crossCli ? `the copy's run override: ` : ""}${b.cmd}${ARG_PROMPT.has(b.cli) ? " <prompt>" : ""}
+  prompt: ${prompt}
+  ${dir}/take.sh --no-audio --frames   (dry run)
+  ${dir}/take.sh --frames              (the video)`);

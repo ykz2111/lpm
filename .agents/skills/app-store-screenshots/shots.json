@@ -1,0 +1,70 @@
+{
+  "outDir": "~/Pictures/lpm-link-app-store",
+  "devices": {
+    "iphone": { "simulator": "iPhone 18 Pro", "folder": "iphone-6.3", "size": [1206, 2622], "screenRadius": 165,
+      "cutout": [414, 33, 378, 111] },
+    "ipad": { "simulator": "iPad Pro 13-inch (M5)", "folder": "ipad-13", "size": [2064, 2752], "screenRadius": 72 },
+    "duo-closed": { "simulator": "iPhone Duo", "pose": "Closed", "display": "primary", "folder": "iphone-duo-outer",
+      "size": [1398, 2034], "screenRadius": [21, 156, 156, 21], "cutout": [1195, 88, 110, 110] },
+    "duo-open": { "simulator": "iPhone Duo", "pose": "Open", "display": "primary-1", "folder": "iphone-duo-inner",
+      "size": [2007, 2853], "screenRadius": 141 }
+  },
+  "shots": [
+    {
+      "name": "projects",
+      "route": "list",
+      "title": "Your Mac's projects,\nin your pocket",
+      "subtitle": "Every project, dev server and AI agent at a glance",
+      "devices": ["iphone", "ipad", "duo-closed", "duo-open"]
+    },
+    {
+      "name": "agent",
+      "route": "project:storefront > terminal:storefront/demo-storefront-claude",
+      "wait": 6,
+      "title": "Reply to your\nAI agents",
+      "subtitle": "Read what they did and send the next prompt",
+      "devices": ["iphone", "ipad", "duo-closed", "duo-open"],
+      "captions": {
+        "duo-open": { "title": "Unfold for\nmore room", "subtitle": "More of the session on iPhone Duo's big screen" }
+      }
+    },
+    {
+      "name": "project",
+      "route": "project:storefront",
+      "wait": 5,
+      "title": "Know when an agent\nneeds you",
+      "subtitle": "Start and stop dev servers on your Mac with a tap",
+      "devices": ["iphone", "duo-closed"]
+    },
+    {
+      "name": "diff",
+      "route": "project:storefront > changes:storefront",
+      "wait": 5,
+      "title": "Review changes\nbefore you commit",
+      "subtitle": "Line-by-line diffs of everything your agents wrote",
+      "devices": ["iphone", "ipad", "duo-closed", "duo-open"]
+    },
+    {
+      "name": "usage",
+      "route": "usage",
+      "title": "Stay ahead of\nusage limits",
+      "subtitle": "Live plan usage for your AI coding tools",
+      "devices": ["iphone", "ipad", "duo-closed", "duo-open"]
+    },
+    {
+      "name": "stats",
+      "route": "stats",
+      "wait": 6,
+      "title": "See where your\ntokens go",
+      "subtitle": "Tokens, sessions and cost by project and model",
+      "devices": ["iphone", "ipad", "duo-closed", "duo-open"]
+    },
+    {
+      "name": "automation",
+      "route": "automations > automation:storefront/nightly-tests",
+      "title": "Automations\non a schedule",
+      "subtitle": "Nightly tests run on your Mac and report back",
+      "devices": ["iphone", "ipad", "duo-closed", "duo-open"]
+    }
+  ]
+}
