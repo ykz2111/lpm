@@ -40,14 +40,25 @@ mark_noindex
 # whose arguments happen to mention cargo would read as a live build and the
 # guard would silently never fire. Erring toward skipping is safe — this runs on
 # every dev start, so a missed cycle is picked up by the next one.
-if pgrep -qx rustc || pgrep -qx cargo; then
+rustc_status=0
+cargo_status=0
+pgrep -qx rustc >/dev/null 2>&1 || rustc_status=$?
+pgrep -qx cargo >/dev/null 2>&1 || cargo_status=$?
+if [ "$rustc_status" -eq 0 ] || [ "$cargo_status" -eq 0 ]; then
   echo "check-build-cache: build in progress, skipping"
+  exit 0
+fi
+if [ "$rustc_status" -ne 1 ] || [ "$cargo_status" -ne 1 ]; then
+  echo "check-build-cache: cannot inspect running builds, skipping cache cleanup"
   exit 0
 fi
 
 SIZE_KB=$(du -sk "$DEBUG_DIR" | cut -f1)
 SIZE_GB=$((SIZE_KB / 1024 / 1024))
-FILES=$(find "$DEBUG_DIR/deps" -type f 2>/dev/null | wc -l | tr -d ' ')
+FILES=0
+if [ -d "$DEBUG_DIR/deps" ]; then
+  FILES=$(find "$DEBUG_DIR/deps" -type f | wc -l | tr -d ' ')
+fi
 
 if [ "$SIZE_GB" -lt "$MAX_GB" ] && [ "$FILES" -lt "$MAX_FILES" ]; then
   echo "check-build-cache: ${SIZE_GB}GB / ${FILES} files (limits ${MAX_GB}GB / ${MAX_FILES}) — ok"

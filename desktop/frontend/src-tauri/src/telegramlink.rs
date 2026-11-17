@@ -184,6 +184,14 @@ impl Link {
         self.owner == Some(user)
     }
 
+    pub(crate) fn has_owner(&self) -> bool {
+        self.owner.is_some()
+    }
+
+    pub(crate) fn is_private_chat(&self, chat: i64) -> bool {
+        self.chats.iter().any(|known| known.chat_id == chat && known.kind == "private")
+    }
+
     /// The chat an update brings in, if it's one the user meant: the first
     /// chat's Start carrying this link's code, the owner's own Start in a chat,
     /// or the owner adding the bot to a group or channel. Being removed is

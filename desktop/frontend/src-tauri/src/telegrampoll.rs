@@ -1,11 +1,9 @@
-// The one reader of the bot's updates in this app. While a question lpm posted
-// to Telegram is open it long-polls getUpdates, and each batch goes both to
-// linking (telegram::take_new_chats) and to answers (telegramanswer), so
-// neither swallows the other's updates. Settings' chat finder reads the same
-// stream. One process reads at a time (a lock file under ~/.lpm). The user
-// answering on lpm's message for a question this machine never posted is
-// answering another Mac with the same bot: that update isn't confirmed for
-// two minutes, so that Mac can still read it.
+// The one reader of the bot's updates in this app. A linked owner can chat to
+// an agent at any time, and an open automation question adds its own answer
+// handling. Each batch goes to linking, automation answers, then ordinary chat
+// routing. Settings' chat finder reads the same stream. One process reads at a
+// time (a lock file under ~/.lpm). A question posted by another Mac is held for
+// two minutes so that Mac can still read its answer.
 
 use crate::telegram::{api, client, ApiError};
 use crate::telegramanswer::{self, Seen};
@@ -69,7 +67,7 @@ pub fn init(app: &AppHandle) {
             }
         });
     });
-    if !cfg!(debug_assertions) && telegramasks::with(|r| r.has_open()) {
+    if !cfg!(debug_assertions) && wanted() {
         ensure_running();
     }
 }
@@ -77,6 +75,13 @@ pub fn init(app: &AppHandle) {
 /// A question went out to Telegram: start reading, even after a fatal stop.
 pub fn posted() {
     POSTED_HERE.store(true, Ordering::SeqCst);
+    FATAL.store(false, Ordering::SeqCst);
+    ensure_running();
+}
+
+/// Opening the Telegram settings starts chat polling in a debug build too,
+/// without reading an existing Keychain token just because the app launched.
+pub fn linked() {
     FATAL.store(false, Ordering::SeqCst);
     ensure_running();
 }
@@ -122,7 +127,7 @@ fn pause(d: Duration) {
 }
 
 fn wanted() -> bool {
-    !STOP.load(Ordering::SeqCst) && telegramasks::with(|r| r.has_open())
+    !STOP.load(Ordering::SeqCst) && (telegramasks::with(|r| r.has_open()) || crate::telegramlink::Link::load().has_owner())
 }
 
 fn lock_file() -> Option<std::fs::File> {
@@ -247,6 +252,11 @@ fn pump(client: &reqwest::blocking::Client, token: &str, timeout: u64) -> Result
         let seen = APP
             .get()
             .map_or(Seen::Other, |app| telegramanswer::handle(app, token, update));
+        let seen = if seen == Seen::Other && update.get("message").is_some_and(|message| crate::telegramchat::handle(token, message)) {
+            Seen::Handled
+        } else {
+            seen
+        };
         let mut guard = HELD.lock().unwrap_or_else(|e| e.into_inner());
         let held = guard.get_or_insert_with(HashMap::new);
         if seen == Seen::Foreign && (held.contains_key(&id) || held.len() < MAX_HELD) {
@@ -288,6 +298,9 @@ pub fn look() -> Result<Vec<Chat>, String> {
         if try_lock(&lock) {
             let token = crate::telegram::token()?;
             pump(&client(Duration::from_secs(20))?, &token, 0).map_err(|e| e.text)?;
+            if crate::telegramlink::Link::load().has_owner() {
+                ensure_running();
+            }
         }
     }
     Ok(std::mem::take(

@@ -132,6 +132,13 @@ fn send_message(
     ))
 }
 
+pub(crate) fn send_chat_message(token: &str, chat_id: i64, title: &str, body: &str) -> Result<(), String> {
+    for message in telegramfmt::messages(title, Some(body), MAX_MESSAGE_CHARS) {
+        send_message(token, chat_id, &message, None)?;
+    }
+    Ok(())
+}
+
 pub struct Telegram;
 
 impl Destination for Telegram {
@@ -215,6 +222,9 @@ pub fn telegram_status() -> Value {
     if has_token && link.ensure_code() {
         let _ = link.save();
     }
+    if has_token && link.has_owner() {
+        crate::telegrampoll::linked();
+    }
     json!({
         "connected": has_token && !link.chats.is_empty(),
         "hasToken": has_token,
@@ -245,7 +255,7 @@ pub fn telegram_connect(token: String) -> Result<Value, String> {
 /// without a separate test.
 fn welcome(chat: &Chat) -> &'static str {
     if chat.kind == "private" {
-        "lpm is connected. Automations that send to Telegram will post their results in this chat, and you can answer their questions here."
+        "lpm is connected. Automations that send to Telegram will post their results here, and you can answer their questions here. You can also chat with an agent: send /help to choose a project and start a conversation."
     } else {
         "lpm will post automation results here."
     }

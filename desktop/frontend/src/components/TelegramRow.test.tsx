@@ -67,7 +67,7 @@ describe("TelegramRow", () => {
     state.hasToken = false;
     state.chats = [];
     await act(async () => root.render(<TelegramRow host={null} />));
-    expect(host.textContent).toContain("Send automation results to a Telegram chat");
+    expect(host.textContent).toContain("Chat with an agent privately");
     expect(host.querySelector("input, textarea")).toBeNull();
     act(() => button("Connect")!.click());
     expect(document.body.textContent).toContain("Connect Telegram");

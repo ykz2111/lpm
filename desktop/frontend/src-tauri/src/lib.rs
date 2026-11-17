@@ -360,6 +360,7 @@ mod secrets;
 mod sendto;
 mod telegram;
 mod telegramanswer;
+mod telegramchat;
 mod telegramask;
 mod telegramasks;
 mod telegramfmt;

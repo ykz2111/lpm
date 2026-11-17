@@ -33,7 +33,7 @@ export function TelegramRow({ host }: { host: string | null }) {
         ? `Posts through ${bot}. Each automation picks which of these chats it sends to.`
         : waiting
           ? (link.problem?.text ?? `Almost there: open ${bot} in Telegram and tap Start`)
-          : "Send automation results to a Telegram chat, group or channel";
+          : "Chat with an agent privately, or send automation results to a Telegram chat, group or channel";
 
   return (
     <>

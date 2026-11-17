@@ -2539,6 +2539,78 @@ fn capture_cmdline(agent: Option<&str>, cmdline: &str, log_path: &Path) -> Strin
     }
 }
 
+/// A single, read-only agent turn started by a trusted conversational surface.
+/// It shares the exact headless invocation and result extraction used by jobs,
+/// but deliberately has no job state: Telegram conversations are not schedules.
+pub(crate) struct ChatAgentOutput {
+    pub result: String,
+    pub session: Option<String>,
+}
+
+pub(crate) fn run_chat_agent(
+    project: &str,
+    prompt: &str,
+    requested_agent: &str,
+    resume: Option<&str>,
+) -> Result<ChatAgentOutput, String> {
+    let (root, remote) = config::project_root(project)?;
+    if remote {
+        return Err("Telegram conversations aren't available for SSH projects yet.".into());
+    }
+    if root.trim().is_empty() {
+        return Err("This project has no local folder to run an agent in.".into());
+    }
+    let agent = match requested_agent.trim() {
+        "claude" | "codex" => requested_agent.trim().to_string(),
+        "" => default_ai_cli(),
+        other => return Err(format!("Unknown agent: {other}")),
+    };
+    if !matches!(agent.as_str(), "claude" | "codex") {
+        return Err("Telegram chat supports Claude or Codex only, so every turn stays read-only.".into());
+    }
+    let logs = config::lpm_dir().join("telegram-chat-logs");
+    std::fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
+    let log_path = logs.join(format!("{}.log", uuid::Uuid::new_v4().simple()));
+    let prompt = format!(
+        "{prompt}\n\nYou are replying through a private Telegram chat. Keep the reply self-contained. Do not use lpm ask; state any decision you need in your final response. Do not modify files, run mutating commands, or make network changes."
+    );
+    let cmdline = if agent == "claude" {
+        claude_cmdline(resume, "", "", false, false, &prompt)
+    } else {
+        format!(
+            "codex exec --sandbox read-only --skip-git-repo-check {}",
+            config::shell_quote(&prompt)
+        )
+    };
+    let cmdline = capture_cmdline(Some(&agent), &cmdline, &log_path);
+    let line = captured_shell_line(&cmdline, &log_path);
+    let crate::claude_pool::Spawn { env: claude, .. } = crate::claude_pool::job_spawn_env(project, None, None);
+    let mut child = captured_command(&root, &line, &[], &claude, true)
+        .spawn()
+        .map_err(|e| format!("Couldn't start {agent}: {e}"))?;
+    let verdict = wait_or_kill(&mut child, std::time::Instant::now() + RUN_TIMEOUT, None)
+        .map_err(|e| e.to_string())?;
+    let raw = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let parsed = extract_output(Some(&agent), &raw, &log_path);
+    let _ = std::fs::remove_file(last_message_path(&log_path));
+    let _ = std::fs::remove_file(&log_path);
+    match verdict {
+        WaitVerdict::Exited(true) => match parsed {
+            Some((result, session, _)) => Ok(ChatAgentOutput { result: head_chars(&result, OUTPUT_CAP_CHARS), session }),
+            None => {
+                let result = fallback_output(Some(&agent), &raw);
+                if result.trim().is_empty() { Err(format!("{agent} finished without a reply.")) } else { Ok(ChatAgentOutput { result, session: None }) }
+            }
+        },
+        WaitVerdict::TimedOut => Err(format!("{agent} took too long to reply.")),
+        WaitVerdict::Canceled => Err("The agent turn was canceled.".into()),
+        WaitVerdict::Exited(false) => {
+            let detail = fallback_output(Some(&agent), &raw).trim().to_string();
+            Err(if detail.is_empty() { format!("{agent} stopped without completing the turn.") } else { detail })
+        }
+    }
+}
+
 fn spawn_captured(app: &AppHandle, key: &str, root: &str, spec: CaptureSpec) -> Dispatch {
     let logs = config::lpm_dir().join("job-logs");
     if std::fs::create_dir_all(&logs).is_err() {
